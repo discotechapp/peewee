@@ -6118,6 +6118,8 @@ class Model(with_metaclass(ModelBase, Node)):
         for k in kwargs:
             setattr(self, k, kwargs[k])
 
+        self.prepared()
+
     def __str__(self):
         return str(self._pk) if self._meta.primary_key is not False else 'n/a'
 
@@ -6410,6 +6412,9 @@ class Model(with_metaclass(ModelBase, Node)):
     @property
     def dirty_fields(self):
         return [f for f in self._meta.sorted_fields if f.name in self._dirty]
+
+    def prepared(self):
+        pass
 
     def dependencies(self, search_nullable=False):
         model_class = type(self)
@@ -7418,6 +7423,7 @@ class ModelCursorWrapper(BaseModelCursorWrapper):
         for instance in object_list:
             if isinstance(instance, Model):
                 instance._dirty.clear()
+                instance.prepared()
 
         return objects[self.model]
 
@@ -7455,6 +7461,7 @@ class PrefetchQuery(collections.namedtuple('_PrefetchQuery', (
                 for inst in rel_instances:
                     setattr(inst, attname, instance)
                 setattr(instance, field.backref, rel_instances)
+        instance.prepared()
 
     def store_instance(self, instance, id_map):
         for field, attname in self.field_to_name:
