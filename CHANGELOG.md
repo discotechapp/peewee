@@ -7,7 +7,65 @@ https://github.com/coleifer/peewee/releases
 
 ## master
 
-[View commits](https://github.com/coleifer/peewee/compare/3.10.0...master)
+* Bulk insert (`insert_many()` and `insert_from()`) will now return the row
+  count instead of the last insert ID. If you are using Postgres, peewee will
+  continue to return a cursor that provides an iterator over the newly-inserted
+  primary-key values by default. This behavior is being retained by default for
+  compatibility. Postgres users can simply specify an empty `returning()` call
+  to disable the cursor and retrieve the rowcount instead.
+* Migration extension now supports altering a column's data-type.
+
+[View commits](https://github.com/coleifer/peewee/compare/3.11.2...master)
+
+## 3.11.2
+
+* Implement `hash` interface for `Alias` instances, allowing them to be used in
+  multi-source queries.
+
+[View commits](https://github.com/coleifer/peewee/compare/3.11.1...3.11.2)
+
+## 3.11.1
+
+* Fix bug in new `_pk` / `get_id()` implementation for models that explicitly
+  have disabled a primary-key.
+
+[View commits](https://github.com/coleifer/peewee/compare/3.11.0...3.11.1)
+
+## 3.11.0
+
+* Fixes #1991. This particular issue involves joining 3 models together in a
+  chain, where the outer two models are empty. Previously peewee would make the
+  middle model an empty model instance (since a link might be needed from the
+  source model to the outermost model). But since both were empty, it is more
+  correct to make the intervening model a NULL value on the foreign-key field
+  rather than an empty instance.
+* An unrelated fix came out of the work on #1991 where hashing a model whose
+  primary-key happened to be a foreign-key could trigger the FK resolution
+  query. This patch fixes the `Model._pk` and `get_id()` interfaces so they
+  no longer introduce the possibility of accidentally resolving the FK.
+* Allow `Field.contains()`, `startswith()` and `endswith()` to compare against
+  another column-like object or expression.
+* Workaround for MySQL prior to 8 and MariaDB handling of union queries inside
+  of parenthesized expressions (like IN).
+* Be more permissive in letting invalid values be stored in a field whose type
+  is INTEGER or REAL, since Sqlite allows this.
+* `TimestampField` resolution cleanup. Now values 0 *and* 1 will resolve to a
+  timestamp resolution of 1 second. Values 2-6 specify the number of decimal
+  places (hundredths to microsecond), or alternatively the resolution can still
+  be provided as a power of 10, e.g. 10, 1000 (millisecond), 1e6 (microsecond).
+* When self-referential foreign-keys are inherited, the foreign-key on the
+  subclass will also be self-referential (rather than pointing to the parent
+  model).
+* Add TSV import/export option to the `dataset` extension.
+* Add item interface to the `dataset.Table` class for doing primary-key lookup,
+  assignment, or deletion.
+* Extend the mysql `ReconnectMixin` helper to work with mysql-connector.
+* Fix mapping of double-precision float in postgres schema reflection.
+  Previously it mapped to single-precision, now it correctly uses a double.
+* Fix issue where `PostgresqlExtDatabase` and `MySQLConnectorDatabase` did not
+  respect the `autoconnect` setting.
+
+[View commits](https://github.com/coleifer/peewee/compare/3.10.0...3.11.0)
 
 ## 3.10.0
 

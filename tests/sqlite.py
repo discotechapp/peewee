@@ -1,3 +1,4 @@
+from decimal import Decimal as D
 import os
 import sys
 
@@ -16,6 +17,7 @@ from .base import requires_models
 from .base import skip_if
 from .base import skip_unless
 from .base_models import User
+from .sqlite_helpers import compile_option
 from .sqlite_helpers import json_installed
 from .sqlite_helpers import json_patch_installed
 
@@ -456,6 +458,18 @@ class TestJSONField(ModelTestCase):
         kd2_db = KeyData.get(KeyData.key == 'k2')
         self.assertEqual(kd2_db.data, {'k1': 'v1', 'k2': 'v2'})
 
+    def test_json_bulk_update_top_level_list(self):
+        kd1 = KeyData.create(key='k1', data=['a', 'b', 'c'])
+        kd2 = KeyData.create(key='k2', data=['d', 'e', 'f'])
+
+        kd1.data = ['g', 'h', 'i']
+        kd2.data = ['j', 'k', 'l']
+        KeyData.bulk_update([kd1, kd2], fields=[KeyData.data])
+        kd1_db = KeyData.get(KeyData.key == 'k1')
+        kd2_db = KeyData.get(KeyData.key == 'k2')
+        self.assertEqual(kd1_db.data, ['g', 'h', 'i'])
+        self.assertEqual(kd2_db.data, ['j', 'k', 'l'])
+
 
 @skip_unless(json_installed(), 'requires sqlite json1')
 class TestJSONFieldFunctions(ModelTestCase):
@@ -626,6 +640,20 @@ class TestJSONFieldFunctions(ModelTestCase):
                  .execute())
         for k in self.Q.where(KeyData.key.in_(['a', 'b'])):
             self.assertEqual(k.data, {'foo': 'bar'})
+
+    def test_children(self):
+        children = KeyData.data.children().alias('children')
+        query = (KeyData
+                 .select(KeyData.key, children.c.fullkey.alias('fullkey'))
+                 .from_(KeyData, children)
+                 .where(~children.c.fullkey.contains('k'))
+                 .order_by(KeyData.id, SQL('fullkey')))
+        accum = [(row.key, row.fullkey) for row in query]
+        self.assertEqual(accum, [
+            ('a', '$.x1'),
+            ('b', '$.x2'),
+            ('d', '$.x1'),
+            ('e', '$.l1'), ('e', '$.l2')])
 
     def test_tree(self):
         tree = KeyData.data.tree().alias('tree')
@@ -1057,6 +1085,74 @@ class TestFullTextSearch(BaseFTSTestCase, ModelTestCase):
         assertQueryScore(MultiColumn.c2, 'eeee', [('m2', -1.02)], 0., 2., 0.)
         assertQueryScore(MultiColumn.c3, 'aaaa', [('m3', -0.31)], 0., 1., 0.5)
 
+    @skip_unless(compile_option('enable_fts4'))
+    @requires_models(MultiColumn)
+    def test_match_column_queries(self):
+        data = (
+            ('alpha one', 'apple aspires to ace artsy beta launch'),
+            ('beta two', 'beta boasts better broadcast over apple'),
+            ('gamma three', 'gold gray green gamma ray delta data'),
+            ('delta four', 'delta data indicates downturn for apple beta'),
+        )
+        MC = MultiColumn
+
+        for i, (title, message) in enumerate(data):
+            MC.create(c1=title, c2=message, c3='', c4=i)
+
+        def assertQ(expr, idxscore):
+            q = (MC
+                 .select(MC, MC.bm25().alias('score'))
+                 .where(expr)
+                 .order_by(SQL('score'), MC.c4))
+            self.assertEqual([(r.c4, round(r.score, 2)) for r in q], idxscore)
+
+        # Single whitespace does not affect the mapping of col->term. We can
+        # also store the column value in quotes if single-quotes are used.
+        assertQ(MC.match('beta'), [(1, -0.85), (0, -0.), (3, -0.)])
+        assertQ(MC.match('c1:beta'), [(1, -0.85)])
+        assertQ(MC.match('c1: beta'), [(1, -0.85)])
+        assertQ(MC.match('c1: ^bet*'), [(1, -0.85)])
+        assertQ(MC.match('c1: \'beta\''), [(1, -0.85)])
+        assertQ(MC.match('"beta"'), [(1, -0.85), (0, -0.), (3, -0.)])
+
+        # Alternatively, just specify the column explicitly.
+        assertQ(MC.c1.match('beta'), [(1, -0.85)])
+        assertQ(MC.c1.match(' beta '), [(1, -0.85)])
+        assertQ(MC.c1.match('"beta"'), [(1, -0.85)])
+        assertQ(MC.c1.match('"^bet*"'), [(1, -0.85)])
+
+        #                 apple   beta   delta   gamma
+        # 0  |  alpha  |    X       X
+        # 1  |  beta   |    X       X
+        # 2  |  gamma  |                   X       X
+        # 3  |  delta  |    X       X      X
+        #
+        assertQ(MC.match('delta NOT gamma'), [(3, -0.85)])
+        assertQ(MC.match('delta NOT c2:gamma'), [(3, -0.85)])
+        assertQ(MC.match('"delta"'), [(3, -0.85), (2, -0.)])
+        assertQ(MC.match('c1:delta OR c2:delta'), [(3, -0.85), (2, -0.)])
+        assertQ(MC.match('"^delta"'), [(3, -1.69)])
+
+        assertQ(MC.match('(delta AND c2:apple) OR c1:alpha'),
+                [(3, -0.85), (0, -0.85)])
+        assertQ(MC.match('(c2:delta AND c2:apple) OR c1:alpha'),
+                [(0, -0.85), (3, -0.)])
+        assertQ(MC.match('c2:delta c2:apple OR c1:alpha'),
+                [(0, -0.85), (3, -0.)])
+        assertQ(MC.match('(c2:delta AND c2:apple) OR beta'),
+                [(1, -0.85), (3, -0.), (0, -0.)])
+        assertQ(MC.match('c2:delta AND (c2:apple OR c1:alpha)'),
+                [(3, -0.)])
+
+        # c2 apple (0,1,3) OR (...irrelevant...).
+        assertQ(MC.match('c2:apple OR c1:alpha NOT delta'),
+                [(0, -0.85), (1, -0.), (3, -0.)])
+        assertQ(MC.match('c2:apple OR (c1:alpha NOT c2:delta)'),
+                [(0, -0.85), (1, -0.), (3, -0.)])
+        # c2 apple OR c1 alpha (0, 1, 3) AND NOT delta (2, 3) -> (0, 1).
+        assertQ(MC.match('(c2:apple OR c1:alpha) NOT delta'),
+                [(0, -0.85), (1, -0.)])
+
 
 @skip_unless(CYTHON_EXTENSION, 'requires sqlite c extension')
 class TestFullTextSearchCython(TestFullTextSearch):
@@ -1214,6 +1310,74 @@ class TestFTS5(BaseFTSTestCase, ModelTestCase):
         self.assertEqual([(d.message, round(d.score, 2)) for d in query], [
             (self.messages[2], -0.37),
             (self.messages[3], -0.37)])
+
+    def test_match_column_queries(self):
+        data = (
+            ('alpha one', 'apple aspires to ace artsy beta launch'),
+            ('beta two', 'beta boasts better broadcast over apple'),
+            ('gamma three', 'gold gray green gamma ray delta data'),
+            ('delta four', 'delta data indicates downturn for apple beta'),
+        )
+        FT = FTS5Test
+
+        for i, (title, message) in enumerate(data):
+            FT.create(title=title, data=message, misc=str(i))
+
+        def assertQ(expr, idxscore):
+            q = (FT
+                 .select(FT, FT.bm25().alias('score'))
+                 .where(expr)
+                 .order_by(SQL('score'), FT.misc.cast('int')))
+            self.assertEqual([(int(r.misc), round(r.score, 2)) for r in q],
+                             idxscore)
+
+        # Single whitespace does not affect the mapping of col->term. We can
+        # also store the column value in quotes if single-quotes are used.
+        assertQ(FT.match('beta'), [(1, -0.74), (0, -0.57), (3, -0.57)])
+        assertQ(FT.match('title: beta'), [(1, -2.08)])
+        assertQ(FT.match('title: ^bet*'), [(1, -2.08)])
+        assertQ(FT.match('title: "beta"'), [(1, -2.08)])
+        assertQ(FT.match('"beta"'), [(1, -0.74), (0, -0.57), (3, -0.57)])
+
+        # Alternatively, just specify the column explicitly.
+        assertQ(FT.title.match('beta'), [(1, -2.08)])
+        assertQ(FT.title.match(' beta '), [(1, -2.08)])
+        assertQ(FT.title.match('"beta"'), [(1, -2.08)])
+        assertQ(FT.title.match('^bet*'), [(1, -2.08)])
+        assertQ(FT.title.match('"^bet*"'), [])  # No wildcards in quotes!
+
+        #                 apple   beta   delta   gamma
+        # 0  |  alpha  |    X       X
+        # 1  |  beta   |    X       X
+        # 2  |  gamma  |                   X       X
+        # 3  |  delta  |    X       X      X
+        #
+        assertQ(FT.match('delta NOT gamma'), [(3, -1.53)])
+        assertQ(FT.match('delta NOT data:gamma'), [(3, -1.53)])
+        assertQ(FT.match('"delta"'), [(3, -1.53), (2, -1.2)])
+        assertQ(FT.match('title:delta OR data:delta'), [(3, -3.21), (2, -1.2)])
+        assertQ(FT.match('"^delta"'), [(3, -1.53), (2, -1.2)])  # Different.
+        assertQ(FT.match('^delta'), [(3, -2.57)])  # Different from FTS4.
+
+        assertQ(FT.match('(delta AND data:apple) OR title:alpha'),
+                [(3, -2.09), (0, -2.02)])
+        assertQ(FT.match('(data:delta AND data:apple) OR title:alpha'),
+                [(0, -2.02), (3, -1.76)])
+        assertQ(FT.match('data:delta data:apple OR title:alpha'),
+                [(0, -2.02), (3, -1.76)])
+        assertQ(FT.match('(data:delta AND data:apple) OR beta'),
+                [(3, -2.33), (1, -0.74), (0, -0.57)])
+        assertQ(FT.match('data:delta AND (data:apple OR title:alpha)'),
+                [(3, -1.76)])
+
+        # data apple (0,1,3) OR (...irrelevant...).
+        assertQ(FT.match('data:apple OR title:alpha NOT delta'),
+                [(0, -2.58), (1, -0.58), (3, -0.57)])
+        assertQ(FT.match('data:apple OR (title:alpha NOT data:delta)'),
+                [(0, -2.58), (1, -0.58), (3, -0.57)])
+        # data apple OR title alpha (0, 1, 3) AND NOT delta (2, 3) -> (0, 1).
+        assertQ(FT.match('(data:apple OR title:alpha) NOT delta'),
+                [(0, -2.58), (1, -0.58)])
 
 
 @skip_unless(CYTHON_EXTENSION, 'requires sqlite c extension')
@@ -2024,3 +2188,25 @@ class TestReadOnly(ModelTestCase):
         # We cannot create a database if in read-only mode.
         db = SqliteDatabase('file:xx_not_exists.db?mode=ro', uri=True)
         self.assertRaises(OperationalError, db.connect)
+
+
+class TDecModel(TestModel):
+    value = TDecimalField(max_digits=24, decimal_places=16, auto_round=True)
+
+
+class TestTDecimalField(ModelTestCase):
+    database = get_in_memory_db()
+    requires = [TDecModel]
+
+    def test_tdecimal_field(self):
+        value = D('12345678.0123456789012345')
+        value_ov = D('12345678.012345678901234567890123456789')
+
+        td1 = TDecModel.create(value=value)
+        td2 = TDecModel.create(value=value_ov)
+
+        td1_db = TDecModel.get(TDecModel.id == td1.id)
+        self.assertEqual(td1_db.value, value)
+
+        td2_db = TDecModel.get(TDecModel.id == td2.id)
+        self.assertEqual(td2_db.value, D('12345678.0123456789012346'))

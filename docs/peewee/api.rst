@@ -2817,7 +2817,12 @@ Fields
 
     Field class for storing auto-incrementing primary keys using 64-bits.
 
-.. py:class:: IdentityField
+.. py:class:: IdentityField([generate_always=False])
+
+    :param bool generate_always: if specified, then the identity will always be
+        generated (and specifying the value explicitly during INSERT will raise
+        a programming error). Otherwise, the identity value is only generated
+        as-needed.
 
     Field class for storing auto-incrementing primary keys using the new
     Postgres 10 *IDENTITY* column type. The column definition ends up looking
@@ -3165,15 +3170,24 @@ Fields
 
 .. py:class:: TimestampField([resolution=1[, utc=False[, **kwargs]]])
 
-    :param resolution: A power of 10, 1=second, 1000=ms, 1000000=us, etc.
+    :param resolution: Can be provided as either a power of 10, or as an
+        exponent indicating how many decimal places to store.
     :param bool utc: Treat timestamps as UTC.
 
     Field class for storing date-times as integer timestamps. Sub-second
     resolution is supported by multiplying by a power of 10 to get an integer.
 
-    Accepts a special parameter ``resolution``, which is a power-of-10 up to
-    ``10^6``. This allows sub-second precision while still using an
-    :py:class:`IntegerField` for storage. Default is ``1`` (second precision).
+    If the ``resolution`` parameter is ``0`` *or* ``1``, then the timestamp is
+    stored using second resolution. A resolution between ``2`` and ``6`` is
+    treated as the number of decimal places, e.g. ``resolution=3`` corresponds
+    to milliseconds. Alternatively, the decimal can be provided as a multiple
+    of 10, such that ``resolution=10`` will store 1/10th of a second
+    resolution.
+
+    The ``resolution`` parameter can be either 0-6 *or* 10, 100, etc up to
+    1000000 (for microsecond resolution). This allows sub-second precision
+    while still using an :py:class:`IntegerField` for storage. The default is
+    second resolution.
 
     Also accepts a boolean parameter ``utc``, used to indicate whether the
     timestamps should be UTC. Default is ``False``.
@@ -3952,6 +3966,7 @@ Model
 
         :param rows: An iterable that yields rows to insert.
         :param list fields: List of fields being inserted.
+        :return: number of rows modified (see note).
 
         INSERT multiple rows of data.
 
@@ -4021,10 +4036,17 @@ Model
             * `Changing run-time limits <https://www.sqlite.org/c3ref/limit.html>`_
             * `SQLite compile-time flags <https://www.sqlite.org/compile.html>`_
 
+        .. note::
+            The default return value is the number of rows modified. However,
+            when using Postgres, Peewee will return a cursor by default that
+            yields the primary-keys of the inserted rows. To disable this
+            functionality with Postgres, use an empty call to ``returning()``.
+
     .. py:classmethod:: insert_from(query, fields)
 
         :param Select query: SELECT query to use as source of data.
         :param fields: Fields to insert data into.
+        :return: number of rows modified (see note).
 
         INSERT data using a SELECT query as the source. This API should be used
         for queries of the form *INSERT INTO ... SELECT FROM ...*.
@@ -4041,6 +4063,12 @@ Model
             UserTweetDenorm.insert_from(
                 source,
                 [UserTweetDenorm.username, UserTweetDenorm.num_tweets]).execute()
+
+        .. note::
+            The default return value is the number of rows modified. However,
+            when using Postgres, Peewee will return a cursor by default that
+            yields the primary-keys of the inserted rows. To disable this
+            functionality with Postgres, use an empty call to ``returning()``.
 
     .. py:classmethod:: replace([__data=None[, **insert]])
 
