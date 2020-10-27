@@ -4462,6 +4462,8 @@ class Field(ColumnBase):
             accum.append(SQL("DEFAULT NEXTVAL('%s')" % self.sequence))
         if self.constraints:
             accum.extend(self.constraints)
+        if self.default is not None:
+            accum.append(SQL("DEFAULT %s" % self.default))
         if self.collation:
             accum.append(SQL('COLLATE %s' % self.collation))
         return NodeList(accum)
