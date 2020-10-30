@@ -4462,7 +4462,7 @@ class Field(ColumnBase):
             accum.append(SQL("DEFAULT NEXTVAL('%s')" % self.sequence))
         if self.constraints:
             accum.extend(self.constraints)
-        if self.default is not None:
+        if self.default is not None and self.field_type != "TEXT":
             if isinstance(self.default, str):
                 accum.append(SQL("DEFAULT '%s'" % self.default))
             elif isinstance(self.default, (bool, int)):
