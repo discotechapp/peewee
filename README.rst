@@ -1,4 +1,12 @@
-.. image:: http://media.charlesleifer.com/blog/photos/peewee3-logo.png
+.. image:: https://i.imgur.com/U5jfoKs.png
+
+peewee: Discotech fork
+------
+Differences from from original peewee:
+
+* Added back ``prepared()`` hook that was removed in peewee v3. This helps with change tracking.
+* ``Model.create_table()`` applies ``DEFAULT`` DDL clauses, as specified by the ``default`` param in field definitions. This helps enforce consistency between peewee fields  and actual db/schema/SQL.
+
 
 peewee
 ======
