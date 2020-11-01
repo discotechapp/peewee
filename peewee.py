@@ -4463,7 +4463,9 @@ class Field(ColumnBase):
         if self.constraints:
             accum.extend(self.constraints)
         if self.default is not None and self.field_type != "TEXT":
-            if isinstance(self.default, str):
+            if self.field_type == "timestamp":
+                accum.append(SQL("DEFAULT %s" % self.default))
+            elif isinstance(self.default, str):
                 accum.append(SQL("DEFAULT '%s'" % self.default))
             elif isinstance(self.default, (bool, int)):
                 accum.append(SQL("DEFAULT %s" % self.default))
