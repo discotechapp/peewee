@@ -2,6 +2,7 @@ from bisect import bisect_left
 from bisect import bisect_right
 from contextlib import contextmanager
 from copy import deepcopy
+from enum import Enum
 from functools import wraps
 from inspect import isclass
 import calendar
@@ -4465,6 +4466,8 @@ class Field(ColumnBase):
         if self.default is not None and self.field_type != "TEXT":
             if self.field_type == "timestamp":
                 accum.append(SQL("DEFAULT %s" % self.default))
+            elif isinstance(self.default, Enum):
+                accum.append(SQL("DEFAULT '%s'" % self.default.name))
             elif isinstance(self.default, str):
                 accum.append(SQL("DEFAULT '%s'" % self.default))
             elif isinstance(self.default, (bool, int)):
