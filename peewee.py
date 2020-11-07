@@ -2,7 +2,6 @@ from bisect import bisect_left
 from bisect import bisect_right
 from contextlib import contextmanager
 from copy import deepcopy
-from enum import Enum
 from functools import wraps
 from inspect import isclass
 import calendar
@@ -21,6 +20,7 @@ import threading
 import time
 import uuid
 import warnings
+from enum import Enum
 try:
     from collections.abc import Mapping
 except ImportError:
@@ -4413,6 +4413,14 @@ class Field(ColumnBase):
     def column(self):
         return Column(self.model._meta.table, self.column_name)
 
+    @property
+    def has_default(self):
+        if self.constraints:
+            for constraint in self.constraints:
+                if constraint.sql.startswith("DEFAULT"):
+                    return True
+        return False
+
     def adapt(self, value):
         return value
 
@@ -4463,12 +4471,8 @@ class Field(ColumnBase):
             accum.append(SQL("DEFAULT NEXTVAL('%s')" % self.sequence))
         if self.constraints:
             accum.extend(self.constraints)
-        if self.default is not None and self.field_type != "TEXT":
-            if self.field_type == "timestamp" and self.default == datetime.datetime.utcnow:
-                accum.append(SQL("DEFAULT CURRENT_TIMESTAMP"))
-            elif isinstance(self.default, Enum):
-                accum.append(SQL("DEFAULT '%s'" % self.default.name))
-            elif isinstance(self.default, str):
+        if self.default is not None and not self.has_default and self.field_type != "TEXT":
+            if isinstance(self.default, str):
                 accum.append(SQL("DEFAULT '%s'" % self.default))
             elif isinstance(self.default, (bool, int)):
                 accum.append(SQL("DEFAULT %s" % self.default))
