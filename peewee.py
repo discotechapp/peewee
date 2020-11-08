@@ -20,7 +20,6 @@ import threading
 import time
 import uuid
 import warnings
-from enum import Enum
 try:
     from collections.abc import Mapping
 except ImportError:
@@ -4414,10 +4413,10 @@ class Field(ColumnBase):
         return Column(self.model._meta.table, self.column_name)
 
     @property
-    def has_default(self):
+    def has_default_constraint(self):
         if self.constraints:
             for constraint in self.constraints:
-                if constraint.sql.startswith("DEFAULT"):
+                if constraint.sql.startswith(("DEFAULT", "default")):
                     return True
         return False
 
@@ -4471,7 +4470,7 @@ class Field(ColumnBase):
             accum.append(SQL("DEFAULT NEXTVAL('%s')" % self.sequence))
         if self.constraints:
             accum.extend(self.constraints)
-        if self.default is not None and not self.has_default and self.field_type != "TEXT":
+        if self.default is not None and not self.has_default_constraint and self.field_type != "TEXT":
             if isinstance(self.default, str):
                 accum.append(SQL("DEFAULT '%s'" % self.default))
             elif isinstance(self.default, (bool, int)):
