@@ -4416,7 +4416,7 @@ class Field(ColumnBase):
     def has_default_constraint(self):
         if self.constraints:
             for constraint in self.constraints:
-                if constraint.sql.startswith(("DEFAULT", "default")):
+                if constraint.sql.lower().startswith("default"):
                     return True
         return False
 
